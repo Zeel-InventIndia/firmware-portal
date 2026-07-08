@@ -1,0 +1,6 @@
+node_modules/
+.env
+dist/
+backend/tmp_uploads/*
+!backend/tmp_uploads/.gitkeep
+*.log

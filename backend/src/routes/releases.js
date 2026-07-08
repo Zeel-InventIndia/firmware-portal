@@ -1,0 +1,215 @@
+const express = require('express');
+const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
+const { pool } = require('../db');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
+const drive = require('../services/googleDrive');
+
+const router = express.Router();
+
+const STAGE_NAMES = {
+  1: 'Firmware Team',
+  2: 'QC Team',
+  3: 'Kitchen Team',
+  4: 'Sandy Sir',
+};
+
+const upload = multer({ dest: path.join(__dirname, '..', '..', 'tmp_uploads') });
+
+function serializeRelease(release, stages, { canSeeFiles }) {
+  return {
+    id: release.id,
+    project_id: release.project_id,
+    version: release.version,
+    note: release.note,
+    overall_status: release.overall_status,
+    created_by: release.created_by,
+    created_at: release.created_at,
+    bin_file_name: canSeeFiles ? release.bin_file_name : null,
+    zip_file_name: canSeeFiles ? release.zip_file_name : null,
+    files_available: canSeeFiles,
+    stages: stages
+      .sort((a, b) => a.stage_number - b.stage_number)
+      .map((s) => ({
+        stage_number: s.stage_number,
+        stage_name: s.stage_name,
+        status: s.status,
+        remarks: s.remarks,
+        updated_at: s.updated_at,
+      })),
+  };
+}
+
+async function recomputeOverallStatus(releaseId) {
+  const { rows } = await pool.query('SELECT status FROM release_stages WHERE release_id = $1', [releaseId]);
+  let overall = 'pending';
+  if (rows.some((r) => r.status === 'failed')) overall = 'rejected';
+  else if (rows.length > 0 && rows.every((r) => r.status === 'passed')) overall = 'approved';
+  await pool.query('UPDATE releases SET overall_status = $1 WHERE id = $2', [overall, releaseId]);
+  return overall;
+}
+
+// List releases for a project
+router.get('/projects/:projectId/releases', requireAuth, async (req, res) => {
+  const { projectId } = req.params;
+  const { rows: releases } = await pool.query(
+    'SELECT * FROM releases WHERE project_id = $1 ORDER BY created_at DESC',
+    [projectId]
+  );
+  if (releases.length === 0) return res.json({ releases: [] });
+
+  const { rows: stages } = await pool.query(
+    'SELECT * FROM release_stages WHERE release_id = ANY($1::int[])',
+    [releases.map((r) => r.id)]
+  );
+
+  const result = releases.map((release) => {
+    const canSeeFiles = req.user.role === 'admin' || release.overall_status === 'approved';
+    return serializeRelease(
+      release,
+      stages.filter((s) => s.release_id === release.id),
+      { canSeeFiles }
+    );
+  });
+  res.json({ releases: result });
+});
+
+// Single release detail
+router.get('/releases/:id', requireAuth, async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM releases WHERE id = $1', [req.params.id]);
+  const release = rows[0];
+  if (!release) return res.status(404).json({ error: 'Release not found' });
+
+  const { rows: stages } = await pool.query('SELECT * FROM release_stages WHERE release_id = $1', [release.id]);
+  const canSeeFiles = req.user.role === 'admin' || release.overall_status === 'approved';
+  res.json({ release: serializeRelease(release, stages, { canSeeFiles }) });
+});
+
+// Admin: create a new release (uploads .bin and .zip to Google Drive)
+router.post(
+  '/projects/:projectId/releases',
+  requireAuth,
+  requireAdmin,
+  upload.fields([{ name: 'bin', maxCount: 1 }, { name: 'zip', maxCount: 1 }]),
+  async (req, res) => {
+    const { projectId } = req.params;
+    const { version, note } = req.body || {};
+    const binFile = req.files?.bin?.[0];
+    const zipFile = req.files?.zip?.[0];
+
+    const cleanup = () => {
+      [binFile, zipFile].forEach((f) => {
+        if (f) fs.unlink(f.path, () => {});
+      });
+    };
+
+    if (!version || !version.trim()) {
+      cleanup();
+      return res.status(400).json({ error: 'Firmware version is required' });
+    }
+    if (!binFile || !zipFile) {
+      cleanup();
+      return res.status(400).json({ error: 'Both a .bin file and a .zip file are required' });
+    }
+
+    try {
+      const { rows: projectRows } = await pool.query('SELECT * FROM projects WHERE id = $1', [projectId]);
+      const project = projectRows[0];
+      if (!project) {
+        cleanup();
+        return res.status(404).json({ error: 'Project not found' });
+      }
+
+      // Lazily create (or reuse) the project's Drive folder.
+      let folderId = project.drive_folder_id;
+      if (!folderId) {
+        folderId = await drive.getOrCreateProjectFolder(project.name, process.env.GOOGLE_DRIVE_ROOT_FOLDER_ID);
+        await pool.query('UPDATE projects SET drive_folder_id = $1 WHERE id = $2', [folderId, project.id]);
+      }
+
+      const versionTag = version.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
+      const binUpload = await drive.uploadFile(
+        binFile.path,
+        `${versionTag}_${binFile.originalname}`,
+        'application/octet-stream',
+        folderId
+      );
+      const zipUpload = await drive.uploadFile(
+        zipFile.path,
+        `${versionTag}_${zipFile.originalname}`,
+        'application/zip',
+        folderId
+      );
+
+      const { rows } = await pool.query(
+        `INSERT INTO releases (project_id, version, note, bin_file_id, bin_file_name, zip_file_id, zip_file_name, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [projectId, version.trim(), note || null, binUpload.id, binUpload.name, zipUpload.id, zipUpload.name, req.user.id]
+      );
+      const release = rows[0];
+
+      const stageInserts = [1, 2, 3, 4].map((num) =>
+        pool.query(
+          'INSERT INTO release_stages (release_id, stage_number, stage_name) VALUES ($1, $2, $3)',
+          [release.id, num, STAGE_NAMES[num]]
+        )
+      );
+      await Promise.all(stageInserts);
+
+      cleanup();
+      const { rows: stages } = await pool.query('SELECT * FROM release_stages WHERE release_id = $1', [release.id]);
+      res.status(201).json({ release: serializeRelease(release, stages, { canSeeFiles: true }) });
+    } catch (err) {
+      cleanup();
+      console.error(err);
+      res.status(500).json({ error: 'Failed to create release. Check Google Drive configuration.' });
+    }
+  }
+);
+
+// Admin: update one approval stage (pass/fail + remarks)
+router.patch('/releases/:id/stages/:stageNumber', requireAuth, requireAdmin, async (req, res) => {
+  const { id, stageNumber } = req.params;
+  const { status, remarks } = req.body || {};
+  if (!['passed', 'failed', 'pending'].includes(status)) {
+    return res.status(400).json({ error: "status must be 'passed', 'failed' or 'pending'" });
+  }
+
+  const { rowCount } = await pool.query(
+    `UPDATE release_stages
+     SET status = $1, remarks = $2, updated_by = $3, updated_at = now()
+     WHERE release_id = $4 AND stage_number = $5`,
+    [status, remarks || null, req.user.id, id, stageNumber]
+  );
+  if (rowCount === 0) return res.status(404).json({ error: 'Stage not found' });
+
+  const overall_status = await recomputeOverallStatus(id);
+  const { rows: stages } = await pool.query('SELECT * FROM release_stages WHERE release_id = $1', [id]);
+  res.json({ overall_status, stages });
+});
+
+// Download the bin or zip file — only once the release is fully approved (or if admin)
+router.get('/releases/:id/download/:fileType', requireAuth, async (req, res) => {
+  const { id, fileType } = req.params;
+  if (!['bin', 'zip'].includes(fileType)) return res.status(400).json({ error: 'fileType must be bin or zip' });
+
+  const { rows } = await pool.query('SELECT * FROM releases WHERE id = $1', [id]);
+  const release = rows[0];
+  if (!release) return res.status(404).json({ error: 'Release not found' });
+
+  const canDownload = req.user.role === 'admin' || release.overall_status === 'approved';
+  if (!canDownload) return res.status(403).json({ error: 'This firmware has not completed approval yet' });
+
+  const fileId = fileType === 'bin' ? release.bin_file_id : release.zip_file_id;
+  if (!fileId) return res.status(404).json({ error: 'File not found' });
+
+  try {
+    await drive.pipeFileToResponse(fileId, res);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch file from Google Drive' });
+  }
+});
+
+module.exports = router;
