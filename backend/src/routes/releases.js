@@ -3,7 +3,7 @@ const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const { pool } = require('../db');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdmin, hasPermission } = require('../middleware/auth');
 const drive = require('../services/googleDrive');
 
 const router = express.Router();
@@ -17,7 +17,7 @@ const STAGE_NAMES = {
 
 const upload = multer({ dest: path.join(__dirname, '..', '..', 'tmp_uploads') });
 
-function serializeRelease(release, stages, { canSeeFiles }) {
+function serializeRelease(release, stages, { canSeeFiles, user }) {
   return {
     id: release.id,
     project_id: release.project_id,
@@ -37,8 +37,13 @@ function serializeRelease(release, stages, { canSeeFiles }) {
         status: s.status,
         remarks: s.remarks,
         updated_at: s.updated_at,
+        can_update: user ? hasPermission(user, `stage_${s.stage_number}`) : false,
       })),
   };
+}
+
+function canSeeFilesFor(user, release) {
+  return hasPermission(user, 'early_access') || release.overall_status === 'approved';
 }
 
 async function recomputeOverallStatus(releaseId) {
@@ -65,11 +70,11 @@ router.get('/projects/:projectId/releases', requireAuth, async (req, res) => {
   );
 
   const result = releases.map((release) => {
-    const canSeeFiles = req.user.role === 'admin' || release.overall_status === 'approved';
+    const canSeeFiles = canSeeFilesFor(req.user, release);
     return serializeRelease(
       release,
       stages.filter((s) => s.release_id === release.id),
-      { canSeeFiles }
+      { canSeeFiles, user: req.user }
     );
   });
   res.json({ releases: result });
@@ -82,8 +87,8 @@ router.get('/releases/:id', requireAuth, async (req, res) => {
   if (!release) return res.status(404).json({ error: 'Release not found' });
 
   const { rows: stages } = await pool.query('SELECT * FROM release_stages WHERE release_id = $1', [release.id]);
-  const canSeeFiles = req.user.role === 'admin' || release.overall_status === 'approved';
-  res.json({ release: serializeRelease(release, stages, { canSeeFiles }) });
+  const canSeeFiles = canSeeFilesFor(req.user, release);
+  res.json({ release: serializeRelease(release, stages, { canSeeFiles, user: req.user }) });
 });
 
 // Admin: create a new release (uploads .bin and .zip to Google Drive)
@@ -159,7 +164,7 @@ router.post(
 
       cleanup();
       const { rows: stages } = await pool.query('SELECT * FROM release_stages WHERE release_id = $1', [release.id]);
-      res.status(201).json({ release: serializeRelease(release, stages, { canSeeFiles: true }) });
+      res.status(201).json({ release: serializeRelease(release, stages, { canSeeFiles: true, user: req.user }) });
     } catch (err) {
       cleanup();
       console.error(err);
@@ -168,10 +173,14 @@ router.post(
   }
 );
 
-// Admin: update one approval stage (pass/fail + remarks)
-router.patch('/releases/:id/stages/:stageNumber', requireAuth, requireAdmin, async (req, res) => {
+// Update one approval stage (pass/fail + remarks) — admin, or a user granted that specific stage
+router.patch('/releases/:id/stages/:stageNumber', requireAuth, async (req, res) => {
   const { id, stageNumber } = req.params;
   const { status, remarks } = req.body || {};
+
+  if (!hasPermission(req.user, `stage_${stageNumber}`)) {
+    return res.status(403).json({ error: 'You do not have permission to update this approval stage' });
+  }
   if (!['passed', 'failed', 'pending'].includes(status)) {
     return res.status(400).json({ error: "status must be 'passed', 'failed' or 'pending'" });
   }
@@ -198,7 +207,7 @@ router.get('/releases/:id/download/:fileType', requireAuth, async (req, res) => 
   const release = rows[0];
   if (!release) return res.status(404).json({ error: 'Release not found' });
 
-  const canDownload = req.user.role === 'admin' || release.overall_status === 'approved';
+  const canDownload = canSeeFilesFor(req.user, release);
   if (!canDownload) return res.status(403).json({ error: 'This firmware has not completed approval yet' });
 
   const fileId = fileType === 'bin' ? release.bin_file_id : release.zip_file_id;
