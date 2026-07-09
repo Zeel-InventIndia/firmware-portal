@@ -222,6 +222,8 @@ input:focus, textarea:focus, select:focus {
 .field-row { display: flex; gap: 12px; }
 .field-row .field { flex: 1; }
 
+input[type="checkbox"] { accent-color: var(--copper); }
+
 .error-box {
   background: rgba(248,113,113,0.1);
   border: 1px solid var(--fail);
