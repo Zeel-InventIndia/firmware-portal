@@ -6,8 +6,20 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   role          TEXT NOT NULL CHECK (role IN ('admin', 'viewer')),
+  permissions   JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Safe to re-run: adds the column for databases created before this feature existed.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- `permissions` keys used by the app (all booleans, all default to absent/false):
+--   early_access : can view/download firmware files before full approval
+--   stage_1      : can update the "Firmware Team" approval stage
+--   stage_2      : can update the "QC Team" approval stage
+--   stage_3      : can update the "Kitchen Team" approval stage
+--   stage_4      : can update the "Sandy Sir" approval stage
+-- Admins implicitly have all of the above regardless of this column.
 
 CREATE TABLE IF NOT EXISTS projects (
   id              SERIAL PRIMARY KEY,
