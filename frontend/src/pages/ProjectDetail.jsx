@@ -9,13 +9,14 @@ function UploadForm({ projectId, onCreated }) {
   const [note, setNote] = useState('');
   const [binFile, setBinFile] = useState(null);
   const [zipFile, setZipFile] = useState(null);
+  const [zip2File, setZip2File] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   async function onSubmit(e) {
     e.preventDefault();
-    if (!binFile || !zipFile) {
-      setError('Please attach both a .bin file and a .zip file.');
+    if (!binFile || !zipFile || !zip2File) {
+      setError('Please attach a .bin file and both .zip files.');
       return;
     }
     setBusy(true);
@@ -26,11 +27,13 @@ function UploadForm({ projectId, onCreated }) {
       fd.append('note', note);
       fd.append('bin', binFile);
       fd.append('zip', zipFile);
+      fd.append('zip2', zip2File);
       await api.createRelease(projectId, fd);
       setVersion('');
       setNote('');
       setBinFile(null);
       setZipFile(null);
+      setZip2File(null);
       e.target.reset();
       onCreated();
     } catch (err) {
@@ -52,11 +55,32 @@ function UploadForm({ projectId, onCreated }) {
         <div className="field-row">
           <div className="field">
             <label>.bin file</label>
-            <input type="file" accept=".bin" onChange={(e) => setBinFile(e.target.files[0])} required />
+            <input
+              type="file"
+              accept=".bin"
+              onChange={(e) => setBinFile(e.target.files[0])}
+              required
+            />
           </div>
+
           <div className="field">
-            <label>.zip file</label>
-            <input type="file" accept=".zip" onChange={(e) => setZipFile(e.target.files[0])} required />
+            <label>Firmware ZIP</label>
+            <input
+              type="file"
+              accept=".zip"
+              onChange={(e) => setZipFile(e.target.files[0])}
+              required
+            />
+          </div>
+
+          <div className="field">
+            <label>Holtek ZIP</label>
+            <input
+              type="file"
+              accept=".zip"
+              onChange={(e) => setZip2File(e.target.files[0])}
+              required
+            />
           </div>
         </div>
         <div className="field">
@@ -162,6 +186,11 @@ function ReleaseCard({ release, isAdmin, onUpdated }) {
           </button>
           <button className="btn" disabled={downloading === 'zip'} onClick={() => download('zip')}>
             {downloading === 'zip' ? 'Fetching…' : `Download ${release.zip_file_name || '.zip'}`}
+          </button>
+          <button className="btn" disabled={downloading === 'zip2'} onClick={() => download('zip2')}>
+            {downloading === 'zip2'
+              ? 'Fetching…'
+              : `Download ${release.zip2_file_name || 'Holtek.zip'}`}
           </button>
         </div>
       ) : (
