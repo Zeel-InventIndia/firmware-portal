@@ -3,39 +3,31 @@ console.log("API_BASE =", API_BASE);
 function getToken() {
   return localStorage.getItem('fp_token');
 }
-
 async function request(path, { method = 'GET', body, isForm = false } = {}) {
   const headers = {};
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (!isForm && body) headers['Content-Type'] = 'application/json';
-
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers,
     body: isForm ? body : body ? JSON.stringify(body) : undefined,
   });
-
   if (res.status === 204) return null;
-
   const isJson = (res.headers.get('content-type') || '').includes('application/json');
   const data = isJson ? await res.json() : await res.blob();
-
   if (!res.ok) {
     throw new Error((data && data.error) || `Request failed (${res.status})`);
   }
   return data;
 }
-
 export const api = {
   login: (email, password) => request('/auth/login', { method: 'POST', body: { email, password } }),
   me: () => request('/auth/me'),
   createUser: (payload) => request('/auth/users', { method: 'POST', body: payload }),
   listUsers: () => request('/auth/users'),
-
   listProjects: () => request('/projects'),
   createProject: (name) => request('/projects', { method: 'POST', body: { name } }),
-
   listReleases: (projectId) => request(`/projects/${projectId}/releases`),
   getRelease: (releaseId) => request(`/releases/${releaseId}`),
   createRelease: (projectId, formData) =>
@@ -45,6 +37,7 @@ export const api = {
       method: 'PATCH',
       body: { status, remarks },
     }),
+  deleteRelease: (releaseId) => request(`/releases/${releaseId}`, { method: 'DELETE' }),
   downloadFile: async (releaseId, fileType) => {
     const token = getToken();
     const res = await fetch(`${API_BASE}/releases/${releaseId}/download/${fileType}`, {
@@ -67,11 +60,9 @@ export const api = {
     a.remove();
     window.URL.revokeObjectURL(url);
   },
-
   createTicket: (payload) => request('/tickets', { method: 'POST', body: payload }),
   trackTicket: (code) => request(`/tickets/track/${encodeURIComponent(code)}`),
   listTickets: (status) => request(`/tickets${status ? `?status=${status}` : ''}`),
   updateTicket: (id, payload) => request(`/tickets/${id}`, { method: 'PATCH', body: payload }),
 };
-
 export { API_BASE, getToken };
