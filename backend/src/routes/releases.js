@@ -28,6 +28,7 @@ function serializeRelease(release, stages, { canSeeFiles, user }) {
     created_at: release.created_at,
     bin_file_name: canSeeFiles ? release.bin_file_name : null,
     zip_file_name: canSeeFiles ? release.zip_file_name : null,
+    zip2_file_name: canSeeFiles ? release.zip2_file_name : null,
     files_available: canSeeFiles,
     stages: stages
       .sort((a, b) => a.stage_number - b.stage_number)
@@ -91,20 +92,25 @@ router.get('/releases/:id', requireAuth, async (req, res) => {
   res.json({ release: serializeRelease(release, stages, { canSeeFiles, user: req.user }) });
 });
 
-// Admin: create a new release (uploads .bin and .zip to Google Drive)
+// Admin: create a new release (uploads .bin, .zip, and optionally a Holtek .zip to Google Drive)
 router.post(
   '/projects/:projectId/releases',
   requireAuth,
   requireAdmin,
-  upload.fields([{ name: 'bin', maxCount: 1 }, { name: 'zip', maxCount: 1 }]),
+  upload.fields([
+    { name: 'bin', maxCount: 1 },
+    { name: 'zip', maxCount: 1 },
+    { name: 'zip2', maxCount: 1 },
+  ]),
   async (req, res) => {
     const { projectId } = req.params;
     const { version, note } = req.body || {};
     const binFile = req.files?.bin?.[0];
     const zipFile = req.files?.zip?.[0];
+    const zip2File = req.files?.zip2?.[0] || null;
 
     const cleanup = () => {
-      [binFile, zipFile].forEach((f) => {
+      [binFile, zipFile, zip2File].forEach((f) => {
         if (f) fs.unlink(f.path, () => {});
       });
     };
@@ -147,10 +153,33 @@ router.post(
         folderId
       );
 
+      // Holtek zip is optional — only upload it to Drive if it was actually attached.
+      let zip2Upload = null;
+      if (zip2File) {
+        zip2Upload = await drive.uploadFile(
+          zip2File.path,
+          `${versionTag}_${zip2File.originalname}`,
+          'application/zip',
+          folderId
+        );
+      }
+
       const { rows } = await pool.query(
-        `INSERT INTO releases (project_id, version, note, bin_file_id, bin_file_name, zip_file_id, zip_file_name, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [projectId, version.trim(), note || null, binUpload.id, binUpload.name, zipUpload.id, zipUpload.name, req.user.id]
+        `INSERT INTO releases
+           (project_id, version, note, bin_file_id, bin_file_name, zip_file_id, zip_file_name, zip2_file_id, zip2_file_name, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+        [
+          projectId,
+          version.trim(),
+          note || null,
+          binUpload.id,
+          binUpload.name,
+          zipUpload.id,
+          zipUpload.name,
+          zip2Upload ? zip2Upload.id : null,
+          zip2Upload ? zip2Upload.name : null,
+          req.user.id,
+        ]
       );
       const release = rows[0];
 
@@ -198,10 +227,12 @@ router.patch('/releases/:id/stages/:stageNumber', requireAuth, async (req, res) 
   res.json({ overall_status, stages });
 });
 
-// Download the bin or zip file — only once the release is fully approved (or if admin)
+// Download the bin, zip, or zip2 (Holtek) file — only once the release is fully approved (or if admin)
 router.get('/releases/:id/download/:fileType', requireAuth, async (req, res) => {
   const { id, fileType } = req.params;
-  if (!['bin', 'zip'].includes(fileType)) return res.status(400).json({ error: 'fileType must be bin or zip' });
+  if (!['bin', 'zip', 'zip2'].includes(fileType)) {
+    return res.status(400).json({ error: 'fileType must be bin, zip, or zip2' });
+  }
 
   const { rows } = await pool.query('SELECT * FROM releases WHERE id = $1', [id]);
   const release = rows[0];
@@ -210,7 +241,8 @@ router.get('/releases/:id/download/:fileType', requireAuth, async (req, res) => 
   const canDownload = canSeeFilesFor(req.user, release);
   if (!canDownload) return res.status(403).json({ error: 'This firmware has not completed approval yet' });
 
-  const fileId = fileType === 'bin' ? release.bin_file_id : release.zip_file_id;
+  const fileId =
+    fileType === 'bin' ? release.bin_file_id : fileType === 'zip' ? release.zip_file_id : release.zip2_file_id;
   if (!fileId) return res.status(404).json({ error: 'File not found' });
 
   try {
