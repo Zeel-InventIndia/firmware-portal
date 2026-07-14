@@ -4,19 +4,27 @@ import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import StageLights from '../components/StageLights';
 
-function UploadForm({ projectId, onCreated }) {
+function UploadForm({ projectId, projectType, onCreated }) {
   const [version, setVersion] = useState('');
   const [note, setNote] = useState('');
   const [binFile, setBinFile] = useState(null);
   const [zipFile, setZipFile] = useState(null);
   const [zip2File, setZip2File] = useState(null);
+  const [exeFile, setExeFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
+  const isApp = projectType === 'app';
+
   async function onSubmit(e) {
     e.preventDefault();
-    if (!binFile || !zipFile) {
-      setError('Please attach a .bin file and a .zip file.');
+    if (isApp) {
+      if (!zipFile || !exeFile) {
+        setError('Please attach both a .zip file and a .exe file.');
+        return;
+      }
+    } else if (!binFile) {
+      setError('Please attach a .bin file.');
       return;
     }
     setBusy(true);
@@ -25,17 +33,17 @@ function UploadForm({ projectId, onCreated }) {
       const fd = new FormData();
       fd.append('version', version);
       fd.append('note', note);
-      fd.append('bin', binFile);
-      fd.append('zip', zipFile);
-      if (zip2File) {
-        fd.append('zip2', zip2File);
-      }
+      if (binFile) fd.append('bin', binFile);
+      if (zipFile) fd.append('zip', zipFile);
+      if (zip2File) fd.append('zip2', zip2File);
+      if (exeFile) fd.append('exe', exeFile);
       await api.createRelease(projectId, fd);
       setVersion('');
       setNote('');
       setBinFile(null);
       setZipFile(null);
       setZip2File(null);
+      setExeFile(null);
       e.target.reset();
       onCreated();
     } catch (err) {
@@ -47,7 +55,7 @@ function UploadForm({ projectId, onCreated }) {
 
   return (
     <div className="panel">
-      <div className="section-title">Release new firmware</div>
+      <div className="section-title">Release new {isApp ? 'build' : 'firmware'}</div>
       {error && <div className="error-box">{error}</div>}
       <form onSubmit={onSubmit}>
         <div className="field">
@@ -55,34 +63,48 @@ function UploadForm({ projectId, onCreated }) {
           <input value={version} onChange={(e) => setVersion(e.target.value)} placeholder="e.g. v2.4.1" required />
         </div>
         <div className="field-row">
-          <div className="field">
-            <label>.bin file</label>
-            <input
-              type="file"
-              accept=".bin"
-              onChange={(e) => setBinFile(e.target.files[0])}
-              required
-            />
-          </div>
+          {isApp ? (
+            <>
+              <div className="field">
+                <label>.zip file</label>
+                <input type="file" accept=".zip" onChange={(e) => setZipFile(e.target.files[0])} required />
+              </div>
+              <div className="field">
+                <label>.exe file</label>
+                <input type="file" accept=".exe" onChange={(e) => setExeFile(e.target.files[0])} required />
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="field">
+                <label>.bin file</label>
+                <input
+                  type="file"
+                  accept=".bin"
+                  onChange={(e) => setBinFile(e.target.files[0])}
+                  required
+                />
+              </div>
 
-          <div className="field">
-            <label>Firmware ZIP</label>
-            <input
-              type="file"
-              accept=".zip"
-              onChange={(e) => setZipFile(e.target.files[0])}
-              required
-            />
-          </div>
+              <div className="field">
+                <label>Firmware ZIP (optional)</label>
+                <input
+                  type="file"
+                  accept=".zip"
+                  onChange={(e) => setZipFile(e.target.files[0])}
+                />
+              </div>
 
-          <div className="field">
-            <label>Holtek ZIP (optional)</label>
-            <input
-              type="file"
-              accept=".zip"
-              onChange={(e) => setZip2File(e.target.files[0])}
-            />
-          </div>
+              <div className="field">
+                <label>Holtek ZIP (optional)</label>
+                <input
+                  type="file"
+                  accept=".zip"
+                  onChange={(e) => setZip2File(e.target.files[0])}
+                />
+              </div>
+            </>
+          )}
         </div>
         <div className="field">
           <label>Release note</label>
@@ -206,9 +228,11 @@ function ReleaseCard({ release, isAdmin, onUpdated }) {
           <button className="btn" disabled={downloading === 'bin'} onClick={() => download('bin')}>
             {downloading === 'bin' ? 'Fetching…' : `Download ${release.bin_file_name || '.bin'}`}
           </button>
-          <button className="btn" disabled={downloading === 'zip'} onClick={() => download('zip')}>
-            {downloading === 'zip' ? 'Fetching…' : `Download ${release.zip_file_name || '.zip'}`}
-          </button>
+          {release.zip_file_name && (
+            <button className="btn" disabled={downloading === 'zip'} onClick={() => download('zip')}>
+              {downloading === 'zip' ? 'Fetching…' : `Download ${release.zip_file_name}`}
+            </button>
+          )}
           {release.zip2_file_name && (
             <button className="btn" disabled={downloading === 'zip2'} onClick={() => download('zip2')}>
               {downloading === 'zip2' ? 'Fetching…' : `Download ${release.zip2_file_name}`}
