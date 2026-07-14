@@ -29,6 +29,7 @@ function serializeRelease(release, stages, { canSeeFiles, user }) {
     bin_file_name: canSeeFiles ? release.bin_file_name : null,
     zip_file_name: canSeeFiles ? release.zip_file_name : null,
     zip2_file_name: canSeeFiles ? release.zip2_file_name : null,
+    exe_file_name: canSeeFiles ? release.exe_file_name : null,
     files_available: canSeeFiles,
     stages: stages
       .sort((a, b) => a.stage_number - b.stage_number)
@@ -92,7 +93,8 @@ router.get('/releases/:id', requireAuth, async (req, res) => {
   res.json({ release: serializeRelease(release, stages, { canSeeFiles, user: req.user }) });
 });
 
-// Admin: create a new release (uploads .bin, .zip, and optionally a Holtek .zip to Google Drive)
+// Admin: create a new release. Firmware projects upload .bin + optional .zip + optional Holtek .zip.
+// App projects upload .zip + .exe.
 router.post(
   '/projects/:projectId/releases',
   requireAuth,
@@ -101,27 +103,25 @@ router.post(
     { name: 'bin', maxCount: 1 },
     { name: 'zip', maxCount: 1 },
     { name: 'zip2', maxCount: 1 },
+    { name: 'exe', maxCount: 1 },
   ]),
   async (req, res) => {
     const { projectId } = req.params;
     const { version, note } = req.body || {};
-    const binFile = req.files?.bin?.[0];
-    const zipFile = req.files?.zip?.[0];
+    const binFile = req.files?.bin?.[0] || null;
+    const zipFile = req.files?.zip?.[0] || null;
     const zip2File = req.files?.zip2?.[0] || null;
+    const exeFile = req.files?.exe?.[0] || null;
 
     const cleanup = () => {
-      [binFile, zipFile, zip2File].forEach((f) => {
+      [binFile, zipFile, zip2File, exeFile].forEach((f) => {
         if (f) fs.unlink(f.path, () => {});
       });
     };
 
     if (!version || !version.trim()) {
       cleanup();
-      return res.status(400).json({ error: 'Firmware version is required' });
-    }
-    if (!binFile || !zipFile) {
-      cleanup();
-      return res.status(400).json({ error: 'Both a .bin file and a .zip file are required' });
+      return res.status(400).json({ error: 'Version is required' });
     }
 
     try {
@@ -132,6 +132,18 @@ router.post(
         return res.status(404).json({ error: 'Project not found' });
       }
 
+      if (project.type === 'app') {
+        if (!zipFile || !exeFile) {
+          cleanup();
+          return res.status(400).json({ error: 'Both a .zip file and a .exe file are required for app releases' });
+        }
+      } else {
+        if (!binFile) {
+          cleanup();
+          return res.status(400).json({ error: 'A .bin file is required for firmware releases' });
+        }
+      }
+
       // Lazily create (or reuse) the project's Drive folder.
       let folderId = project.drive_folder_id;
       if (!folderId) {
@@ -140,18 +152,27 @@ router.post(
       }
 
       const versionTag = version.trim().replace(/[^a-zA-Z0-9._-]/g, '_');
-      const binUpload = await drive.uploadFile(
-        binFile.path,
-        `${versionTag}_${binFile.originalname}`,
-        'application/octet-stream',
-        folderId
-      );
-      const zipUpload = await drive.uploadFile(
-        zipFile.path,
-        `${versionTag}_${zipFile.originalname}`,
-        'application/zip',
-        folderId
-      );
+
+      let binUpload = null;
+      if (binFile) {
+        binUpload = await drive.uploadFile(
+          binFile.path,
+          `${versionTag}_${binFile.originalname}`,
+          'application/octet-stream',
+          folderId
+        );
+      }
+
+      // Firmware/app zip is optional for firmware projects, required (checked above) for app projects.
+      let zipUpload = null;
+      if (zipFile) {
+        zipUpload = await drive.uploadFile(
+          zipFile.path,
+          `${versionTag}_${zipFile.originalname}`,
+          'application/zip',
+          folderId
+        );
+      }
 
       // Holtek zip is optional — only upload it to Drive if it was actually attached.
       let zip2Upload = null;
@@ -164,20 +185,32 @@ router.post(
         );
       }
 
+      let exeUpload = null;
+      if (exeFile) {
+        exeUpload = await drive.uploadFile(
+          exeFile.path,
+          `${versionTag}_${exeFile.originalname}`,
+          'application/octet-stream',
+          folderId
+        );
+      }
+
       const { rows } = await pool.query(
         `INSERT INTO releases
-           (project_id, version, note, bin_file_id, bin_file_name, zip_file_id, zip_file_name, zip2_file_id, zip2_file_name, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+           (project_id, version, note, bin_file_id, bin_file_name, zip_file_id, zip_file_name, zip2_file_id, zip2_file_name, exe_file_id, exe_file_name, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
         [
           projectId,
           version.trim(),
           note || null,
-          binUpload.id,
-          binUpload.name,
-          zipUpload.id,
-          zipUpload.name,
+          binUpload ? binUpload.id : null,
+          binUpload ? binUpload.name : null,
+          zipUpload ? zipUpload.id : null,
+          zipUpload ? zipUpload.name : null,
           zip2Upload ? zip2Upload.id : null,
           zip2Upload ? zip2Upload.name : null,
+          exeUpload ? exeUpload.id : null,
+          exeUpload ? exeUpload.name : null,
           req.user.id,
         ]
       );
@@ -236,7 +269,9 @@ router.delete('/releases/:id', requireAuth, requireAdmin, async (req, res) => {
   if (!release) return res.status(404).json({ error: 'Release not found' });
 
   // Best-effort Drive cleanup — a failed/missing file shouldn't block deleting the record.
-  const fileIds = [release.bin_file_id, release.zip_file_id, release.zip2_file_id].filter(Boolean);
+  const fileIds = [release.bin_file_id, release.zip_file_id, release.zip2_file_id, release.exe_file_id].filter(
+    Boolean
+  );
   await Promise.all(
     fileIds.map((fileId) =>
       drive.deleteFile(fileId).catch((err) => {
@@ -262,11 +297,11 @@ router.delete('/releases/:id', requireAuth, requireAdmin, async (req, res) => {
   res.json({ success: true });
 });
 
-// Download the bin, zip, or zip2 (Holtek) file — only once the release is fully approved (or if admin)
+// Download the bin, zip, zip2 (Holtek), or exe file — only once the release is fully approved (or if admin)
 router.get('/releases/:id/download/:fileType', requireAuth, async (req, res) => {
   const { id, fileType } = req.params;
-  if (!['bin', 'zip', 'zip2'].includes(fileType)) {
-    return res.status(400).json({ error: 'fileType must be bin, zip, or zip2' });
+  if (!['bin', 'zip', 'zip2', 'exe'].includes(fileType)) {
+    return res.status(400).json({ error: 'fileType must be bin, zip, zip2, or exe' });
   }
 
   const { rows } = await pool.query('SELECT * FROM releases WHERE id = $1', [id]);
@@ -274,10 +309,15 @@ router.get('/releases/:id/download/:fileType', requireAuth, async (req, res) => 
   if (!release) return res.status(404).json({ error: 'Release not found' });
 
   const canDownload = canSeeFilesFor(req.user, release);
-  if (!canDownload) return res.status(403).json({ error: 'This firmware has not completed approval yet' });
+  if (!canDownload) return res.status(403).json({ error: 'This release has not completed approval yet' });
 
-  const fileId =
-    fileType === 'bin' ? release.bin_file_id : fileType === 'zip' ? release.zip_file_id : release.zip2_file_id;
+  const fileIdMap = {
+    bin: release.bin_file_id,
+    zip: release.zip_file_id,
+    zip2: release.zip2_file_id,
+    exe: release.exe_file_id,
+  };
+  const fileId = fileIdMap[fileType];
   if (!fileId) return res.status(404).json({ error: 'File not found' });
 
   try {
