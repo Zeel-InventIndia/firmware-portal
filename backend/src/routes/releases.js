@@ -227,6 +227,41 @@ router.patch('/releases/:id/stages/:stageNumber', requireAuth, async (req, res) 
   res.json({ overall_status, stages });
 });
 
+// Admin: delete a release — removes the Drive files and the DB rows (stages first, then the release)
+router.delete('/releases/:id', requireAuth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+
+  const { rows } = await pool.query('SELECT * FROM releases WHERE id = $1', [id]);
+  const release = rows[0];
+  if (!release) return res.status(404).json({ error: 'Release not found' });
+
+  // Best-effort Drive cleanup — a failed/missing file shouldn't block deleting the record.
+  const fileIds = [release.bin_file_id, release.zip_file_id, release.zip2_file_id].filter(Boolean);
+  await Promise.all(
+    fileIds.map((fileId) =>
+      drive.deleteFile(fileId).catch((err) => {
+        console.error(`Failed to delete Drive file ${fileId}:`, err.message);
+      })
+    )
+  );
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM release_stages WHERE release_id = $1', [id]);
+    await client.query('DELETE FROM releases WHERE id = $1', [id]);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error(err);
+    return res.status(500).json({ error: 'Failed to delete release' });
+  } finally {
+    client.release();
+  }
+
+  res.json({ success: true });
+});
+
 // Download the bin, zip, or zip2 (Holtek) file — only once the release is fully approved (or if admin)
 router.get('/releases/:id/download/:fileType', requireAuth, async (req, res) => {
   const { id, fileType } = req.params;
