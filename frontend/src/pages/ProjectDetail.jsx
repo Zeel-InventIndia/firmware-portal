@@ -15,8 +15,8 @@ function UploadForm({ projectId, onCreated }) {
 
   async function onSubmit(e) {
     e.preventDefault();
-    if (!binFile || !zipFile || !zip2File) {
-      setError('Please attach a .bin file and both .zip files.');
+    if (!binFile || !zipFile) {
+      setError('Please attach a .bin file and a .zip file.');
       return;
     }
     setBusy(true);
@@ -27,7 +27,9 @@ function UploadForm({ projectId, onCreated }) {
       fd.append('note', note);
       fd.append('bin', binFile);
       fd.append('zip', zipFile);
-      fd.append('zip2', zip2File);
+      if (zip2File) {
+        fd.append('zip2', zip2File);
+      }
       await api.createRelease(projectId, fd);
       setVersion('');
       setNote('');
@@ -74,12 +76,11 @@ function UploadForm({ projectId, onCreated }) {
           </div>
 
           <div className="field">
-            <label>Holtek ZIP</label>
+            <label>Holtek ZIP (optional)</label>
             <input
               type="file"
               accept=".zip"
               onChange={(e) => setZip2File(e.target.files[0])}
-              required
             />
           </div>
         </div>
@@ -187,11 +188,11 @@ function ReleaseCard({ release, isAdmin, onUpdated }) {
           <button className="btn" disabled={downloading === 'zip'} onClick={() => download('zip')}>
             {downloading === 'zip' ? 'Fetching…' : `Download ${release.zip_file_name || '.zip'}`}
           </button>
-          <button className="btn" disabled={downloading === 'zip2'} onClick={() => download('zip2')}>
-            {downloading === 'zip2'
-              ? 'Fetching…'
-              : `Download ${release.zip2_file_name || 'Holtek.zip'}`}
-          </button>
+          {release.zip2_file_name && (
+            <button className="btn" disabled={downloading === 'zip2'} onClick={() => download('zip2')}>
+              {downloading === 'zip2' ? 'Fetching…' : `Download ${release.zip2_file_name}`}
+            </button>
+          )}
         </div>
       ) : (
         <div className="release-meta" style={{ marginTop: 14 }}>
