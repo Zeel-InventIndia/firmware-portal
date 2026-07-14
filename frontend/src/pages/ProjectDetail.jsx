@@ -155,6 +155,7 @@ function StageEditor({ release, onUpdated }) {
 
 function ReleaseCard({ release, isAdmin, onUpdated }) {
   const [downloading, setDownloading] = useState('');
+  const [deleting, setDeleting] = useState(false);
 
   async function download(fileType) {
     setDownloading(fileType);
@@ -167,6 +168,19 @@ function ReleaseCard({ release, isAdmin, onUpdated }) {
     }
   }
 
+  async function handleDelete() {
+    const ok = window.confirm(`Delete release ${release.version}? This cannot be undone.`);
+    if (!ok) return;
+    setDeleting(true);
+    try {
+      await api.deleteRelease(release.id);
+      onUpdated();
+    } catch (err) {
+      alert(err.message);
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="panel release-card">
       <div className="release-header">
@@ -174,7 +188,14 @@ function ReleaseCard({ release, isAdmin, onUpdated }) {
           <span className="release-version">{release.version}</span>
           <div className="release-meta">Released {new Date(release.created_at).toLocaleString()}</div>
         </div>
-        <span className={`status-pill ${release.overall_status}`}>{release.overall_status}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className={`status-pill ${release.overall_status}`}>{release.overall_status}</span>
+          {isAdmin && (
+            <button className="btn small ghost" disabled={deleting} onClick={handleDelete}>
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          )}
+        </div>
       </div>
       {release.note && <div className="release-note">{release.note}</div>}
 
