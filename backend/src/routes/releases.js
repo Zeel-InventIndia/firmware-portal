@@ -26,6 +26,7 @@ function serializeRelease(release, stages, { canSeeFiles, user }) {
     overall_status: release.overall_status,
     created_by: release.created_by,
     created_at: release.created_at,
+    approved_at: release.approved_at,
     bin_file_name: canSeeFiles ? release.bin_file_name : null,
     zip_file_name: canSeeFiles ? release.zip_file_name : null,
     zip2_file_name: canSeeFiles ? release.zip2_file_name : null,
@@ -53,7 +54,13 @@ async function recomputeOverallStatus(releaseId) {
   let overall = 'pending';
   if (rows.some((r) => r.status === 'failed')) overall = 'rejected';
   else if (rows.length > 0 && rows.every((r) => r.status === 'passed')) overall = 'approved';
-  await pool.query('UPDATE releases SET overall_status = $1 WHERE id = $2', [overall, releaseId]);
+  await pool.query(
+    `UPDATE releases
+     SET overall_status = $1,
+         approved_at = CASE WHEN $1 = 'approved' THEN COALESCE(approved_at, now()) ELSE NULL END
+     WHERE id = $2`,
+    [overall, releaseId]
+  );
   return overall;
 }
 
