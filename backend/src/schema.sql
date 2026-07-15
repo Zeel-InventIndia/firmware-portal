@@ -1,5 +1,4 @@
 -- Firmware Portal database schema
-
 CREATE TABLE IF NOT EXISTS users (
   id            SERIAL PRIMARY KEY,
   name          TEXT NOT NULL,
@@ -9,10 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
   permissions   JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
 -- Safe to re-run: adds the column for databases created before this feature existed.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '{}'::jsonb;
-
 -- `permissions` keys used by the app (all booleans, all default to absent/false):
 --   early_access : can view/download firmware files before full approval
 --   stage_1      : can update the "Firmware Team" approval stage
@@ -20,15 +17,19 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS permissions JSONB NOT NULL DEFAULT '{
 --   stage_3      : can update the "Kitchen Team" approval stage
 --   stage_4      : can update the "Sandy Sir" approval stage
 -- Admins implicitly have all of the above regardless of this column.
-
 CREATE TABLE IF NOT EXISTS projects (
   id              SERIAL PRIMARY KEY,
   name            TEXT NOT NULL UNIQUE,
+  type            TEXT NOT NULL DEFAULT 'firmware' CHECK (type IN ('firmware', 'app')),
   drive_folder_id TEXT,
   created_by      INTEGER REFERENCES users(id),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
+-- Safe to re-run: adds the column for databases created before this feature existed.
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'firmware' CHECK (type IN ('firmware', 'app'));
+-- `type` determines which files a release under this project accepts:
+--   firmware : .bin (required), Firmware .zip (optional), Holtek .zip (optional)
+--   app      : .zip (required), .exe (required)
 CREATE TABLE IF NOT EXISTS releases (
   id              SERIAL PRIMARY KEY,
   project_id      INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -38,12 +39,22 @@ CREATE TABLE IF NOT EXISTS releases (
   bin_file_name   TEXT,
   zip_file_id     TEXT,
   zip_file_name   TEXT,
+  zip2_file_id    TEXT,
+  zip2_file_name  TEXT,
+  exe_file_id     TEXT,
+  exe_file_name   TEXT,
   overall_status  TEXT NOT NULL DEFAULT 'pending' CHECK (overall_status IN ('pending', 'approved', 'rejected')),
   created_by      INTEGER REFERENCES users(id),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(project_id, version)
 );
-
+-- Safe to re-run: adds columns for databases created before these features existed.
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS zip2_file_id TEXT;
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS zip2_file_name TEXT;
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS exe_file_id TEXT;
+ALTER TABLE releases ADD COLUMN IF NOT EXISTS exe_file_name TEXT;
+ALTER TABLE releases ALTER COLUMN zip_file_id DROP NOT NULL;
+ALTER TABLE releases ALTER COLUMN zip_file_name DROP NOT NULL;
 CREATE TABLE IF NOT EXISTS release_stages (
   id          SERIAL PRIMARY KEY,
   release_id  INTEGER NOT NULL REFERENCES releases(id) ON DELETE CASCADE,
@@ -55,7 +66,6 @@ CREATE TABLE IF NOT EXISTS release_stages (
   updated_at  TIMESTAMPTZ,
   UNIQUE(release_id, stage_number)
 );
-
 CREATE TABLE IF NOT EXISTS tickets (
   id           SERIAL PRIMARY KEY,
   ticket_code  TEXT NOT NULL UNIQUE,
@@ -71,7 +81,6 @@ CREATE TABLE IF NOT EXISTS tickets (
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS idx_releases_project ON releases(project_id);
 CREATE INDEX IF NOT EXISTS idx_stages_release ON release_stages(release_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_code ON tickets(ticket_code);
