@@ -26,6 +26,7 @@ function serializeRelease(release, stages, { canSeeFiles, user }) {
     overall_status: release.overall_status,
     created_by: release.created_by,
     created_at: release.created_at,
+    release_date: release.release_date,
     approved_at: release.approved_at,
     bin_file_name: canSeeFiles ? release.bin_file_name : null,
     zip_file_name: canSeeFiles ? release.zip_file_name : null,
@@ -49,7 +50,7 @@ function canSeeFilesFor(user, release) {
   return hasPermission(user, 'early_access') || release.overall_status === 'approved';
 }
 
-async function recomputeOverallStatus(releaseId) {
+async function recomputeOverallStatus(releaseId, approvalDate) {
   const { rows } = await pool.query('SELECT status FROM release_stages WHERE release_id = $1', [releaseId]);
   let overall = 'pending';
   if (rows.some((r) => r.status === 'failed')) overall = 'rejected';
@@ -57,9 +58,9 @@ async function recomputeOverallStatus(releaseId) {
   await pool.query(
     `UPDATE releases
      SET overall_status = $1,
-         approved_at = CASE WHEN $1 = 'approved' THEN COALESCE(approved_at, now()) ELSE NULL END
+         approved_at = CASE WHEN $1 = 'approved' THEN COALESCE(approved_at, $3::timestamptz) ELSE NULL END
      WHERE id = $2`,
-    [overall, releaseId]
+    [overall, releaseId, approvalDate || new Date()]
   );
   return overall;
 }
@@ -114,7 +115,7 @@ router.post(
   ]),
   async (req, res) => {
     const { projectId } = req.params;
-    const { version, note } = req.body || {};
+    const { version, note, release_date } = req.body || {};
     const binFile = req.files?.bin?.[0] || null;
     const zipFile = req.files?.zip?.[0] || null;
     const zip2File = req.files?.zip2?.[0] || null;
@@ -204,12 +205,13 @@ router.post(
 
       const { rows } = await pool.query(
         `INSERT INTO releases
-           (project_id, version, note, bin_file_id, bin_file_name, zip_file_id, zip_file_name, zip2_file_id, zip2_file_name, exe_file_id, exe_file_name, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING *`,
+           (project_id, version, note, release_date, bin_file_id, bin_file_name, zip_file_id, zip_file_name, zip2_file_id, zip2_file_name, exe_file_id, exe_file_name, created_by)
+         VALUES ($1, $2, $3, COALESCE($4::date, CURRENT_DATE), $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
         [
           projectId,
           version.trim(),
           note || null,
+          release_date || null,
           binUpload ? binUpload.id : null,
           binUpload ? binUpload.name : null,
           zipUpload ? zipUpload.id : null,
@@ -245,7 +247,7 @@ router.post(
 // Update one approval stage (pass/fail + remarks) — admin, or a user granted that specific stage
 router.patch('/releases/:id/stages/:stageNumber', requireAuth, async (req, res) => {
   const { id, stageNumber } = req.params;
-  const { status, remarks } = req.body || {};
+  const { status, remarks, date } = req.body || {};
 
   if (!hasPermission(req.user, `stage_${stageNumber}`)) {
     return res.status(403).json({ error: 'You do not have permission to update this approval stage' });
@@ -253,16 +255,22 @@ router.patch('/releases/:id/stages/:stageNumber', requireAuth, async (req, res) 
   if (!['passed', 'failed', 'pending'].includes(status)) {
     return res.status(400).json({ error: "status must be 'passed', 'failed' or 'pending'" });
   }
+  let updatedAt = new Date();
+  if (date) {
+    const parsed = new Date(date);
+    if (isNaN(parsed.getTime())) return res.status(400).json({ error: 'Invalid date' });
+    updatedAt = parsed;
+  }
 
   const { rowCount } = await pool.query(
     `UPDATE release_stages
-     SET status = $1, remarks = $2, updated_by = $3, updated_at = now()
-     WHERE release_id = $4 AND stage_number = $5`,
-    [status, remarks || null, req.user.id, id, stageNumber]
+     SET status = $1, remarks = $2, updated_by = $3, updated_at = $4
+     WHERE release_id = $5 AND stage_number = $6`,
+    [status, remarks || null, req.user.id, updatedAt, id, stageNumber]
   );
   if (rowCount === 0) return res.status(404).json({ error: 'Stage not found' });
 
-  const overall_status = await recomputeOverallStatus(id);
+  const overall_status = await recomputeOverallStatus(id, updatedAt);
   const { rows: stages } = await pool.query('SELECT * FROM release_stages WHERE release_id = $1', [id]);
   res.json({ overall_status, stages });
 });
