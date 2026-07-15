@@ -238,6 +238,11 @@ function ReleaseCard({ release, isAdmin, onUpdated }) {
               {downloading === 'zip2' ? 'Fetching…' : `Download ${release.zip2_file_name}`}
             </button>
           )}
+          {release.exe_file_name && (
+            <button className="btn" disabled={downloading === 'exe'} onClick={() => download('exe')}>
+              {downloading === 'exe' ? 'Fetching…' : `Download ${release.exe_file_name}`}
+            </button>
+          )}
         </div>
       ) : (
         <div className="release-meta" style={{ marginTop: 14 }}>
@@ -264,12 +269,16 @@ export default function ProjectDetail() {
   const [releases, setReleases] = useState(null);
   const [error, setError] = useState('');
   const [projectName, setProjectName] = useState('');
+  const [projectType, setProjectType] = useState('firmware');
 
   function load() {
     api.listReleases(projectId).then((d) => setReleases(d.releases)).catch((e) => setError(e.message));
     api.listProjects().then((d) => {
       const p = d.projects.find((x) => String(x.id) === String(projectId));
-      if (p) setProjectName(p.name);
+      if (p) {
+        setProjectName(p.name);
+        setProjectType(p.type || 'firmware');
+      }
     });
   }
 
@@ -284,7 +293,7 @@ export default function ProjectDetail() {
 
       {user.role === 'admin' && (
         <div style={{ marginBottom: 20 }}>
-          <UploadForm projectId={projectId} onCreated={load} />
+          <UploadForm projectId={projectId} projectType={projectType} onCreated={load} />
         </div>
       )}
 
