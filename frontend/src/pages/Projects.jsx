@@ -1,7 +1,80 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
+
+function ProjectCardMenu({ onEdit, onDelete, busy }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e) {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  return (
+    <div
+      ref={ref}
+      style={{ position: 'absolute', top: 10, right: 10 }}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      }}
+    >
+      <button
+        className="btn small ghost"
+        aria-label="Project actions"
+        style={{ padding: '3px 9px', fontSize: 15, lineHeight: 1 }}
+        onClick={() => setOpen((o) => !o)}
+      >
+        &#8942;
+      </button>
+      {open && (
+        <div
+          className="panel"
+          style={{
+            position: 'absolute',
+            top: '100%',
+            right: 0,
+            marginTop: 4,
+            padding: 6,
+            minWidth: 120,
+            zIndex: 10,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+          }}
+        >
+          <button
+            className="btn small ghost"
+            style={{ textAlign: 'left', border: 'none' }}
+            onClick={() => {
+              setOpen(false);
+              onEdit();
+            }}
+          >
+            Edit
+          </button>
+          <button
+            className="btn small ghost"
+            style={{ textAlign: 'left', border: 'none' }}
+            disabled={busy}
+            onClick={() => {
+              setOpen(false);
+              onDelete();
+            }}
+          >
+            {busy ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ProjectCard({ project, isAdmin, onUpdated }) {
   const [editing, setEditing] = useState(false);
@@ -30,9 +103,7 @@ function ProjectCard({ project, isAdmin, onUpdated }) {
     }
   }
 
-  async function handleDelete(e) {
-    e.preventDefault();
-    e.stopPropagation();
+  async function handleDelete() {
     const ok = window.confirm(
       `Delete project "${project.name}"? This deletes all its releases and files. This cannot be undone.`
     );
@@ -81,28 +152,14 @@ function ProjectCard({ project, isAdmin, onUpdated }) {
   }
 
   return (
-    <Link to={`/projects/${project.id}`} className="project-card">
-      <h3>{project.name}</h3>
+    <Link to={`/projects/${project.id}`} className="project-card" style={{ position: 'relative' }}>
+      <h3 style={{ paddingRight: isAdmin ? 24 : 0 }}>{project.name}</h3>
       <div className="meta">
         {project.release_count} release{project.release_count === 1 ? '' : 's'} &middot;{' '}
         {project.type === 'app' ? 'App' : 'Firmware'}
       </div>
       {isAdmin && (
-        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-          <button
-            className="btn small ghost"
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setEditing(true);
-            }}
-          >
-            Edit
-          </button>
-          <button className="btn small ghost" disabled={busy} onClick={handleDelete}>
-            {busy ? 'Deleting…' : 'Delete'}
-          </button>
-        </div>
+        <ProjectCardMenu onEdit={() => setEditing(true)} onDelete={handleDelete} busy={busy} />
       )}
     </Link>
   );
