@@ -208,7 +208,10 @@ function ReleaseCard({ release, isAdmin, onUpdated }) {
       <div className="release-header">
         <div>
           <span className="release-version">{release.version}</span>
-          <div className="release-meta">Released {new Date(release.created_at).toLocaleString()}</div>
+          <div className="release-meta">Date of Release: {new Date(release.created_at).toLocaleDateString()}</div>
+          {release.approved_at && (
+            <div className="release-meta">Date of Approval: {new Date(release.approved_at).toLocaleDateString()}</div>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className={`status-pill ${release.overall_status}`}>{release.overall_status}</span>
