@@ -1,15 +1,18 @@
 :root {
-  --pcb-dark: #0a2b22;
-  --pcb: #0f3b2e;
-  --pcb-light: #144a3a;
-  --silkscreen: #f2f0e6;
-  --silkscreen-dim: #a9c4b8;
+  --pcb-dark: #eef1e9;
+  --pcb: #ffffff;
+  --pcb-light: #e2ece4;
+  --silkscreen: #16241d;
+  --silkscreen-dim: #5f7568;
   --copper: #c9812f;
-  --copper-bright: #e29a45;
-  --pass: #4ade80;
-  --fail: #f87171;
-  --pending: #fbbf24;
-  --border: #1f5b46;
+  --copper-bright: #8a5220;
+  --pass: #15803d;
+  --fail: #b91c1c;
+  --pending: #b45309;
+  --led-pass: #22c55e;
+  --led-fail: #f87171;
+  --led-pending: #fbbf24;
+  --border: #c7d6cb;
   --radius: 6px;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
   --sans: 'Inter', system-ui, -apple-system, sans-serif;
@@ -23,7 +26,7 @@ body {
   margin: 0;
   background: var(--pcb-dark);
   background-image:
-    radial-gradient(circle at 1px 1px, rgba(242,240,230,0.05) 1px, transparent 0);
+    radial-gradient(circle at 1px 1px, rgba(22,36,29,0.06) 1px, transparent 0);
   background-size: 24px 24px;
   color: var(--silkscreen);
   font-family: var(--sans);
@@ -68,7 +71,7 @@ button {
   height: 14px;
   border-radius: 2px;
   background: var(--copper);
-  box-shadow: 0 0 8px rgba(201,129,47,0.7);
+  box-shadow: 0 0 8px rgba(201,129,47,0.5);
 }
 
 .nav-links { display: flex; gap: 18px; align-items: center; }
@@ -124,6 +127,7 @@ button {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 20px;
+  box-shadow: 0 1px 2px rgba(22,36,29,0.05);
 }
 
 .panel + .panel { margin-top: 16px; }
@@ -149,6 +153,7 @@ button {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px;
+  box-shadow: 0 1px 2px rgba(22,36,29,0.05);
   transition: border-color 0.15s, transform 0.1s;
 }
 
@@ -185,7 +190,7 @@ button {
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .btn.primary { background: var(--copper); color: #1a1005; }
-.btn.primary:hover { background: var(--copper-bright); }
+.btn.primary:hover { background: var(--copper-bright); color: #fff; }
 
 .btn.ghost { border-color: var(--border); color: var(--silkscreen-dim); }
 .btn.ghost:hover { background: var(--pcb-light); color: var(--silkscreen); }
@@ -225,9 +230,9 @@ input:focus, textarea:focus, select:focus {
 input[type="checkbox"] { accent-color: var(--copper); }
 
 .error-box {
-  background: rgba(248,113,113,0.1);
+  background: rgba(185,28,28,0.08);
   border: 1px solid var(--fail);
-  color: #ffb4b4;
+  color: #7f1d1d;
   padding: 10px 14px;
   border-radius: var(--radius);
   font-size: 13px;
@@ -235,9 +240,9 @@ input[type="checkbox"] { accent-color: var(--copper); }
 }
 
 .success-box {
-  background: rgba(74,222,128,0.1);
+  background: rgba(21,128,61,0.08);
   border: 1px solid var(--pass);
-  color: #b6f5cd;
+  color: #14532d;
   padding: 10px 14px;
   border-radius: var(--radius);
   font-size: 13px;
@@ -258,13 +263,13 @@ input[type="checkbox"] { accent-color: var(--copper); }
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  background: #2c3a34;
+  background: #dbe4de;
   border: 1px solid var(--border);
 }
 
-.led-dot.passed { background: var(--pass); box-shadow: 0 0 8px rgba(74,222,128,0.8); }
-.led-dot.failed { background: var(--fail); box-shadow: 0 0 8px rgba(248,113,113,0.8); }
-.led-dot.pending { background: var(--pending); opacity: 0.55; }
+.led-dot.passed { background: var(--led-pass); box-shadow: 0 0 8px rgba(34,197,94,0.6); }
+.led-dot.failed { background: var(--led-fail); box-shadow: 0 0 8px rgba(248,113,113,0.6); }
+.led-dot.pending { background: var(--led-pending); opacity: 0.6; }
 
 .led-label {
   font-family: var(--mono);
@@ -285,10 +290,10 @@ input[type="checkbox"] { accent-color: var(--copper); }
   display: inline-block;
 }
 
-.status-pill.approved, .status-pill.passed, .status-pill.resolved { background: rgba(74,222,128,0.15); color: var(--pass); border: 1px solid var(--pass); }
-.status-pill.rejected, .status-pill.failed { background: rgba(248,113,113,0.15); color: var(--fail); border: 1px solid var(--fail); }
-.status-pill.pending, .status-pill.open { background: rgba(251,191,36,0.15); color: var(--pending); border: 1px solid var(--pending); }
-.status-pill.in_progress { background: rgba(76,141,255,0.15); color: #8fb4ff; border: 1px solid #4c8dff; }
+.status-pill.approved, .status-pill.passed, .status-pill.resolved { background: rgba(21,128,61,0.1); color: var(--pass); border: 1px solid var(--pass); }
+.status-pill.rejected, .status-pill.failed { background: rgba(185,28,28,0.1); color: var(--fail); border: 1px solid var(--fail); }
+.status-pill.pending, .status-pill.open { background: rgba(180,83,9,0.1); color: var(--pending); border: 1px solid var(--pending); }
+.status-pill.in_progress { background: rgba(29,78,216,0.1); color: #1d4ed8; border: 1px solid #1d4ed8; }
 
 /* ---------- Releases ---------- */
 .release-card { padding: 18px; }
