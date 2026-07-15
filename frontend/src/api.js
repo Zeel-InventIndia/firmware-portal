@@ -36,10 +36,10 @@ export const api = {
   getRelease: (releaseId) => request(`/releases/${releaseId}`),
   createRelease: (projectId, formData) =>
     request(`/projects/${projectId}/releases`, { method: 'POST', body: formData, isForm: true }),
-  updateStage: (releaseId, stageNumber, status, remarks) =>
+  updateStage: (releaseId, stageNumber, status, remarks, date) =>
     request(`/releases/${releaseId}/stages/${stageNumber}`, {
       method: 'PATCH',
-      body: { status, remarks },
+      body: { status, remarks, date },
     }),
   deleteRelease: (releaseId) => request(`/releases/${releaseId}`, { method: 'DELETE' }),
   downloadFile: async (releaseId, fileType) => {
